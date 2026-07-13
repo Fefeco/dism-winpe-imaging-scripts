@@ -43,9 +43,9 @@ It is designed to run inside **WinPE** to ensure that:
 
 1. **Windows PE Bootable Media**: A USB drive configured with WinPE (v5.0 or newer).
 2. **External Storage Setup**:
-   * A partition labeled **`IMAGENES`** (used by `capture.cmd` to dynamically detect the backup drive).
-   * A root directory named **`WIM`** on that partition (used by `deploy.cmd` to search and index WIM files).
-   * *Note*: These are default values defined as variables at the top of the scripts (`EXT_LABEL` / `EXT_DIR` in `capture.cmd` and `IMGDIR` in `deploy.cmd`) and can be customized.
+   * A directory named **`WIM`** on the storage partition to store, search and index WIM files.
+   * A directory named **`Logs`** where execution logs will be written.
+   * *Note*: These are default values configured via the `STORAGE_DRIVE`, `WIM_DIR` and `LOGS_DIR` variables at the top of both scripts. By default, `STORAGE_DRIVE` is left empty to automatically detect the drive where the scripts are executed (`%~d0`).
 3. **Target Machine Hardware**:
    * UEFI-compatible BIOS (CSM disabled is recommended).
    * Target drive for installation (configured via the `TARGET_DISK` variable in `deploy.cmd`, defaulting to `0`).
@@ -66,7 +66,7 @@ graph TD
     D --> E[End / Logging]
 ```
 
-1. **Unified Drive and OS Detection**: Scans all active drive letters (`C:` to `Z:`, statically excluding the WinPE drive `X:`) in a single fast loop using the native `vol` command. It identifies the external drive (by matching its label with `EXT_LABEL`) and the Windows OS partition (by checking for `Windows\System32\config\SYSTEM` and `Users`).
+1. **OS Detection and Path Resolution**: Dynamically resolves the storage paths (using the `STORAGE_DRIVE` or the script's execution path `%~d0` as fallback) and verifies its accessibility. It then scans active drive letters (`C:` to `Z:`, excluding `X:`) to identify the Windows OS partition by looking for `Windows\System32\config\SYSTEM` and `Users`.
 2. **Input Validation**: Prompts the user for a base name and validates that it is not empty.
 3. **Dynamic Exclusions & DISM Capture**: Generates a temporary `exclude.ini` file. Since using a custom `/ConfigFile` overrides DISM's built-in default exclusions, the script manually writes the default system exclusions (like `pagefile.sys`, `hiberfil.sys`, etc.) first. Then, it dynamically appends user-specific OneDrive sync folders (excluding their contents `\*` to prevent DISM from failing on non-local cloud-only placeholders, while keeping the folder structure itself to avoid broken explorer sidebar links), executes the native `Dism /Capture-Image` tool.
 
@@ -87,7 +87,7 @@ The restoration script operates as follows:
 ## Usage Guide
 
 ### 1. USB Drive Setup
-* Formatted partition label: `IMAGENES`
+* Configure a USB drive (or external disk) to store your scripts, WIM images, and logs. By default, the scripts look for directories in the same drive where they are executed.
 * Directory structure:
   ```text
   <USB_DRIVE>/
@@ -101,7 +101,7 @@ The restoration script operates as follows:
 
 ### 2. Capturing a Windows Image
 1. Boot the target machine into **WinPE**.
-2. Connect your external USB drive labeled `IMAGENES`.
+2. Connect your external USB drive containing the scripts.
 3. Open the command prompt in WinPE and run the capture script:
    ```cmd
    cd /d <PATH_TO_USB_DRIVE>

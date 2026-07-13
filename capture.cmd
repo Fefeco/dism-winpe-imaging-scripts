@@ -1,11 +1,42 @@
 @echo off
+REM ============================================================
+REM  DISM WinPE Imaging Scripts
+REM  Author: Fede (carranzafederico@gmail.com)
+REM  GitHub: https://github.com/fefeco/dism-winpe-imaging-scripts
+REM ============================================================
 setlocal ENABLEDELAYEDEXPANSION
 
 REM ============================================================
 REM  CONFIGURATION
 REM ============================================================
-set "EXT_LABEL=IMAGENES"
-set "EXT_DIR=WIM"
+REM Drive letter of the storage drive (e.g., "D:").
+REM Leave empty to automatically use the drive where this script is running (%~d0).
+set "STORAGE_DRIVE="
+set "WIM_DIR=WIM"
+set "LOGS_DIR=Logs"
+
+REM ============================================================
+REM  RESOLVE STORAGE PATHS
+REM ============================================================
+set "STORAGE_PATH=%STORAGE_DRIVE%"
+if "%STORAGE_PATH%"=="" (
+    set "STORAGE_PATH=%~d0"
+)
+
+REM Verify if the storage drive is accessible
+if not exist "%STORAGE_PATH%\" (
+    echo [ERROR] No se puede acceder a la unidad de almacenamiento "%STORAGE_PATH%".
+    echo Asegurate de que el disco externo esta conectado y tiene la letra correcta.
+    pause
+    exit /b 1
+)
+
+set "WIM_PATH=%STORAGE_PATH%\%WIM_DIR%"
+set "LOGS_PATH=%STORAGE_PATH%\%LOGS_DIR%"
+
+REM Create folders if they don't exist
+if not exist "%WIM_PATH%" mkdir "%WIM_PATH%"
+if not exist "%LOGS_PATH%" mkdir "%LOGS_PATH%"
 
 REM ============================================================
 REM  TIMESTAMP FOR LOG AND IMAGE NAME
@@ -37,73 +68,43 @@ for /f "tokens=1-2 delims=:." %%h in ("%time%") do (
 )
 if "%HH:~0,1%"==" " set "HH=0%HH:~1,1%"
 
-set "TS=%YYYY%%MM%%DD%_%HH%%MIN%"
+set "TIMESTAMP=%YYYY%%MM%%DD%_%HH%%MIN%"
+
+set "LOG_FILE=%LOGS_PATH%\Backup_%TIMESTAMP%.log"
+
+echo ===== INICIO DEL SCRIPT ===== > "%LOG_FILE%"
+echo Disco de almacenamiento resuelto en: %STORAGE_PATH% >> "%LOG_FILE%"
 
 REM ============================================================
-REM  MODULE 1 — DETECT EXTERNAL DISK AND WINDOWS PARTITION
+REM  MODULE 1 — DETECT WINDOWS PARTITION
 REM ============================================================
-echo Buscando disco externo y particion de Windows...
+echo Buscando particion de Windows...
 
-set "DESTINO="
 set "WINPART="
 
 REM Scan all drive letters (excluding X: which is WinPE)
 for %%X in (C D E F G H I J K L M N O P Q R S T U V W Y Z) do (
     if exist "%%X:\" (
-        set "IS_BACKUP="
-        for /f "tokens=5*" %%A in ('vol %%X: 2^>nul') do (
-            if /I "%%A"=="%EXT_LABEL%" set "IS_BACKUP=1"
-            if /I "%%B"=="%EXT_LABEL%" set "IS_BACKUP=1"
-        )
-        
-        if defined IS_BACKUP (
-            set "DESTINO=%%X:\%EXT_DIR%"
-        ) else (
-            if exist "%%X:\Windows\System32\config\SYSTEM" (
-                if exist "%%X:\Users" (
-                    set "WINPART=%%X:"
-                )
+        if exist "%%X:\Windows\System32\config\SYSTEM" (
+            if exist "%%X:\Users" (
+                set "WINPART=%%X:"
             )
         )
     )
 )
 
-REM Validate backup destination
-if not defined DESTINO (
-    echo [ERROR] No se encontro ningun volumen con etiqueta "%EXT_LABEL%".
-    echo Asegurate de que el disco externo esta conectado.
-    pause
-    exit /b 1
-)
-
-if not exist "%DESTINO%\" (
-    echo [ERROR] El volumen tiene la etiqueta correcta pero NO existe la carpeta "%EXT_DIR%".
-    echo Crea la carpeta "%EXT_DIR%" en el disco externo.
-    pause
-    exit /b 1
-)
-
-echo Disco externo detectado en: %DESTINO%
-
-REM Create logs folder
-if not exist "%DESTINO%\LOGS" mkdir "%DESTINO%\LOGS"
-set "LOGFILE=%DESTINO%\LOGS\Backup_%TS%.log"
-
-echo ===== INICIO DEL SCRIPT ===== > "%LOGFILE%"
-echo Disco externo detectado en %DESTINO% >> "%LOGFILE%"
-
 REM Validate Windows partition
 if not defined WINPART (
     echo [ERROR] No se pudo detectar la particion de Windows.
-    echo Esto puede significar que el disco esta cifrado con BitLocker.
+    echo Esto puede significar que el disco esta cifrado con BitLocker o desconectado.
     echo WinPE estandar NO puede desbloquear BitLocker.
-    echo [ERROR] Windows no detectado. Posible BitLocker. >> "%LOGFILE%"
+    echo [ERROR] Windows no detectado. Posible BitLocker. >> "%LOG_FILE%"
     pause
     exit /b 1
 )
 
 echo Particion de Windows detectada en: %WINPART%
-echo Particion de Windows detectada en: %WINPART% >> "%LOGFILE%"
+echo Particion de Windows detectada en: %WINPART% >> "%LOG_FILE%"
 
 REM ============================================================
 REM  MODULE 2 — REQUEST BASE NAME
@@ -119,16 +120,16 @@ if "%IMGBASE%"=="" (
     exit /b 1
 )
 
-set "IMGNAME=%IMGBASE%_%TS%.wim"
+set "IMGNAME=%IMGBASE%_%TIMESTAMP%.wim"
 
 echo Nombre final de imagen: %IMGNAME%
-echo Nombre final de imagen: %IMGNAME% >> "%LOGFILE%"
+echo Nombre final de imagen: %IMGNAME% >> "%LOG_FILE%"
 
 REM ============================================================
 REM  MODULE 3 — CAPTURE IMAGE WITH DISM
 REM ============================================================
 echo Iniciando captura...
-echo Iniciando captura... >> "%LOGFILE%"
+echo Iniciando captura... >> "%LOG_FILE%"
 
 REM Note: Custom /ConfigFile overrides default DISM exclusions (e.g. pagefile.sys).
 REM We must write the default system exclusions manually first.
@@ -153,27 +154,27 @@ for /d %%U in ("%WINPART%\Users\*") do (
 )
 ) > "%TEMP%\exclude.ini"
 
-Dism /Capture-Image /ImageFile:"%DESTINO%\%IMGNAME%" /CaptureDir:%WINPART%\ /Name:"My Windows partition" /ConfigFile:"%TEMP%\exclude.ini" /CheckIntegrity
+Dism /Capture-Image /ImageFile:"%WIM_PATH%\%IMGNAME%" /CaptureDir:%WINPART%\ /Name:"My Windows partition" /ConfigFile:"%TEMP%\exclude.ini" /CheckIntegrity
 del "%TEMP%\exclude.ini"
 set "ERR=%errorlevel%"
 
 if not "%ERR%"=="0" (
     echo [ERROR] DISM devolvio codigo %ERR%.
-    echo [ERROR] DISM devolvio codigo %ERR%. >> "%LOGFILE%"
+    echo [ERROR] DISM devolvio codigo %ERR%. >> "%LOG_FILE%"
     pause
     exit /b %ERR%
 )
 
 echo Captura completada correctamente.
-echo Captura completada correctamente. >> "%LOGFILE%"
+echo Captura completada correctamente. >> "%LOG_FILE%"
 
 REM ============================================================
 REM  END
 REM ============================================================
-echo Archivo generado: %DESTINO%\%IMGNAME%
-echo Archivo generado: %DESTINO%\%IMGNAME% >> "%LOGFILE%"
+echo Archivo generado: %WIM_PATH%\%IMGNAME%
+echo Archivo generado: %WIM_PATH%\%IMGNAME% >> "%LOG_FILE%"
 
-echo ===== FIN DEL SCRIPT ===== >> "%LOGFILE%"
+echo ===== FIN DEL SCRIPT ===== >> "%LOG_FILE%"
 
 pause
 exit /b 0
